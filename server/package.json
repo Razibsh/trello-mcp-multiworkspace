@@ -1,0 +1,29 @@
+{
+  "name": "trello-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-workspace Trello MCP server — one connection, your whole Trello account.",
+  "type": "module",
+  "bin": {
+    "trello-mcp": "./dist/stdio.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/stdio.js",
+    "verify": "node scripts/verify.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260828.1",
+    "@types/node": "^26.4.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.127.1"
+  }
+}

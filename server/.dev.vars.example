@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local `wrangler dev`. Never commit .dev.vars.
+TRELLO_API_KEY=your_trello_api_key
+TRELLO_TOKEN=your_trello_token
+MCP_SECRET=generate_a_long_random_string
+TRELLO_ALLOWED_WORKSPACES=
+TRELLO_READ_ONLY=false
