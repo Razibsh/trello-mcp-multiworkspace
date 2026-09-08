@@ -12,11 +12,19 @@ import {
   AmbiguousNameError,
   NotFoundError,
   Resolver,
+  matchByName,
 } from "./resolve.js";
-import { TrelloClient, TrelloError, type Card, type TrelloConfig } from "./trello.js";
+import {
+  LABEL_COLORS,
+  TrelloClient,
+  TrelloError,
+  type Action,
+  type Card,
+  type TrelloConfig,
+} from "./trello.js";
 
 export const SERVER_NAME = "trello-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -63,6 +71,22 @@ async function guard(fn: () => Promise<ToolResult>): Promise<ToolResult> {
   }
 }
 
+/**
+ * Flatten a Trello action into one line a model can read. Trello's action
+ * types are camelCase verbs ("commentCard", "updateCard"); the data bag tells
+ * the rest. We surface the few fields that carry meaning and drop the noise.
+ */
+function summarizeAction(a: Action) {
+  const by = a.memberCreator ? `${a.memberCreator.fullName} (@${a.memberCreator.username})` : "?";
+  const d = a.data;
+  const out: Record<string, unknown> = { id: a.id, date: a.date, type: a.type, by };
+  if (d.card?.name) out.card = d.card.name;
+  if (d.text) out.text = d.text;
+  if (d.listBefore && d.listAfter) out.moved = `${d.listBefore.name} -> ${d.listAfter.name}`;
+  else if (d.list?.name) out.list = d.list.name;
+  return out;
+}
+
 export function createServer(config: TrelloConfig): McpServer {
   const client = new TrelloClient(config);
   const resolver = new Resolver(client);
@@ -78,6 +102,23 @@ export function createServer(config: TrelloConfig): McpServer {
         "every workspace at once.",
     },
   );
+
+  /**
+   * Member names -> ids, scoped to one board's members. Uses the same
+   * refuse-on-ambiguity matcher as boards, so "Nadav" on a board with two
+   * Nadavs asks instead of guessing. Accepts full name, username, or @username.
+   */
+  const resolveMembers = async (idBoard: string, names: string[]) => {
+    const members = await client.boardMembers(idBoard);
+    return names.map((n) =>
+      matchByName(
+        members,
+        n.replace(/^@/, ""),
+        (m) => [m.fullName, m.username],
+        "member",
+      ),
+    );
+  };
 
   /** Enrich a card with the human-readable board path and a clickable URL. */
   const decorate = async (card: Card) => ({
@@ -338,6 +379,64 @@ export function createServer(config: TrelloConfig): McpServer {
       }),
   );
 
+  server.registerTool(
+    "get_card_comments",
+    {
+      title: "Read a card's comments",
+      description:
+        "All comments on a card, newest first, with author and date. Use this to catch up " +
+        "on a discussion or find a decision that was logged on a card.",
+      inputSchema: {
+        card_id: z.string().describe("Card id or short link."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max comments, default 50."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ card_id, limit }) =>
+      guard(async () => {
+        const actions = await client.cardComments(card_id, limit ?? 50);
+        return ok({
+          count: actions.length,
+          comments: actions.map((a) => ({
+            id: a.id,
+            date: a.date,
+            by: a.memberCreator
+              ? `${a.memberCreator.fullName} (@${a.memberCreator.username})`
+              : "?",
+            text: a.data.text ?? "",
+          })),
+        });
+      }),
+  );
+
+  server.registerTool(
+    "get_board_activity",
+    {
+      title: "Recent activity on a board",
+      description:
+        "What changed on a board recently: cards created, moved, commented, archived, " +
+        "by whom and when. Use this for 'what happened on X this week' or to see what a " +
+        "collaborator has been doing.",
+      inputSchema: {
+        board: z.string().describe("Board name or id."),
+        workspace: z.string().optional().describe("Workspace name, to disambiguate."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max actions, default 50."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ board, workspace, limit }) =>
+      guard(async () => {
+        const target = await resolver.target({ board, workspace });
+        const actions = await client.boardActions(target.board.id, limit ?? 50);
+        return ok({
+          board: target.board.name,
+          workspace: target.workspace?.displayName ?? "(personal)",
+          count: actions.length,
+          activity: actions.map(summarizeAction),
+        });
+      }),
+  );
+
   if (client.readOnly) return server;
 
   // --------------------------------------------------------------- write
@@ -358,6 +457,10 @@ export function createServer(config: TrelloConfig): McpServer {
         due: z.string().optional().describe("Due date, ISO 8601, e.g. 2026-09-15T17:00:00Z."),
         labels: z.array(z.string()).optional().describe("Label names that exist on the board."),
         assign_to_me: z.boolean().optional().describe("Assign the card to you. Default false."),
+        assign_to: z
+          .array(z.string())
+          .optional()
+          .describe("Board members to assign, by full name or @username. Combines with assign_to_me."),
         position: z.enum(["top", "bottom"]).optional().describe("Default bottom."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
@@ -390,13 +493,17 @@ export function createServer(config: TrelloConfig): McpServer {
         }
 
         const me = input.assign_to_me ? await client.me() : undefined;
+        const others = input.assign_to?.length
+          ? await resolveMembers(target.board.id, input.assign_to)
+          : [];
+        const idMembers = [...new Set([...(me ? [me.id] : []), ...others.map((m) => m.id)])];
         const card = await client.createCard({
           idList: target.list.id,
           name: input.name,
           desc: input.desc,
           due: input.due,
           idLabels,
-          idMembers: me ? [me.id] : undefined,
+          idMembers: idMembers.length ? idMembers : undefined,
           pos: input.position,
         });
 
@@ -434,6 +541,58 @@ export function createServer(config: TrelloConfig): McpServer {
           dueComplete: due_complete,
         });
         return ok({ updated: card.name, url: card.shortUrl || card.url });
+      }),
+  );
+
+  server.registerTool(
+    "assign_card",
+    {
+      title: "Assign or unassign members on a card",
+      description:
+        "Add, remove, or replace the people assigned to a card. Members are named by full " +
+        "name or @username and must already be on the card's board (see get_board). " +
+        "Default mode 'add' keeps existing assignees.",
+      inputSchema: {
+        card_id: z.string().describe("Card id or short link."),
+        members: z.array(z.string()).min(1).describe("Full names or @usernames."),
+        mode: z
+          .enum(["add", "remove", "replace"])
+          .optional()
+          .describe("add (default): keep current assignees. remove: unassign these. replace: only these."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ card_id, members, mode }) =>
+      guard(async () => {
+        const card = await client.card(card_id);
+        const wanted = await resolveMembers(card.idBoard, members);
+        const wantedIds = new Set(wanted.map((m) => m.id));
+        const current = new Set(card.idMembers);
+
+        // Compute the diff, then apply it with per-member add/remove calls.
+        const toAdd: string[] = [];
+        const toRemove: string[] = [];
+        if (mode === "remove") {
+          for (const id of wantedIds) if (current.has(id)) toRemove.push(id);
+        } else {
+          for (const id of wantedIds) if (!current.has(id)) toAdd.push(id);
+          if (mode === "replace") {
+            for (const id of current) if (!wantedIds.has(id)) toRemove.push(id);
+          }
+        }
+        for (const id of toRemove) await client.removeMember(card.id, id);
+        for (const id of toAdd) await client.addMember(card.id, id);
+
+        const updated = await client.card(card.id);
+        const all = await client.boardMembers(card.idBoard);
+        return ok({
+          card: updated.name,
+          assigned: updated.idMembers
+            .map((id) => all.find((m) => m.id === id))
+            .filter(Boolean)
+            .map((m) => `${m!.fullName} (@${m!.username})`),
+          url: updated.shortUrl || updated.url,
+        });
       }),
   );
 
@@ -552,6 +711,179 @@ export function createServer(config: TrelloConfig): McpServer {
           done ? "complete" : "incomplete",
         );
         return ok({ item: item.name, done });
+      }),
+  );
+
+  server.registerTool(
+    "update_comment",
+    {
+      title: "Edit a comment",
+      description:
+        "Edit the text of a comment you wrote. Trello only lets the author edit; editing " +
+        "someone else's comment fails. Get comment ids from get_card_comments.",
+      inputSchema: {
+        card_id: z.string().describe("Card id or short link."),
+        comment_id: z.string().describe("Comment (action) id, from get_card_comments."),
+        text: z.string().min(1).describe("Replacement comment body."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ card_id, comment_id, text }) =>
+      guard(async () => {
+        const a = await client.updateComment(card_id, comment_id, text);
+        return ok({ updated: a.id, text: a.data.text ?? text });
+      }),
+  );
+
+  server.registerTool(
+    "attach_link",
+    {
+      title: "Attach a link to a card",
+      description:
+        "Attach a URL (Loom, Google Doc, Figma, anything) to a card. Links only - files " +
+        "are not uploaded through this server.",
+      inputSchema: {
+        card_id: z.string().describe("Card id or short link."),
+        url: z.string().url().describe("The link to attach."),
+        name: z.string().optional().describe("Display name. Defaults to the URL."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ card_id, url, name }) =>
+      guard(async () => {
+        const att = await client.attachUrl(card_id, url, name);
+        return ok({ attached: att.name || att.url, url: att.url, id: att.id });
+      }),
+  );
+
+  // ------------------------------------------------------- structure
+
+  server.registerTool(
+    "create_board",
+    {
+      title: "Create a board",
+      description:
+        "Create a new board in a workspace, optionally with an ordered set of lists. " +
+        "Starts EMPTY (no default To Do / Doing / Done) unless lists are given. Confirm " +
+        "the workspace with the user first - boards cannot be moved between workspaces " +
+        "by this server.",
+      inputSchema: {
+        workspace: z.string().describe("Workspace name the board belongs to."),
+        name: z.string().min(1).describe("Board name."),
+        desc: z.string().optional().describe("Board description."),
+        lists: z
+          .array(z.string().min(1))
+          .optional()
+          .describe("List names to create left-to-right, e.g. ['Inbox','Doing','Done']."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ workspace, name, desc, lists }) =>
+      guard(async () => {
+        const ws = await resolver.workspace(workspace);
+        const board = await client.createBoard({ name, idOrganization: ws.id, desc });
+        // Sequential so the lists land in the order given.
+        const created: string[] = [];
+        for (const l of lists ?? []) {
+          created.push((await client.createList(board.id, l, "bottom")).name);
+        }
+        resolver.invalidate();
+        return ok({
+          created: board.name,
+          workspace: ws.displayName,
+          id: board.id,
+          url: board.shortUrl || board.url,
+          lists: created,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "create_list",
+    {
+      title: "Create a list on a board",
+      description: "Add a list (column) to a board.",
+      inputSchema: {
+        board: z.string().describe("Board name or id."),
+        name: z.string().min(1).describe("List name."),
+        workspace: z.string().optional().describe("Workspace name, to disambiguate boards."),
+        position: z.enum(["top", "bottom"]).optional().describe("Leftmost or rightmost. Default rightmost."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ board, name, workspace, position }) =>
+      guard(async () => {
+        const target = await resolver.target({ board, workspace });
+        const list = await client.createList(target.board.id, name, position ?? "bottom");
+        resolver.invalidate();
+        return ok({
+          created: list.name,
+          board: `${target.workspace?.displayName ?? "(personal)"} > ${target.board.name}`,
+          id: list.id,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "update_list",
+    {
+      title: "Rename, reorder or archive a list",
+      description:
+        "Rename a list, move it to the left/right edge, or archive it (reversible; the " +
+        "cards stay inside it). Pass only what you want to change. Confirm before archiving.",
+      inputSchema: {
+        board: z.string().describe("Board name or id."),
+        list: z.string().describe("Current list name or id."),
+        workspace: z.string().optional().describe("Workspace name, to disambiguate boards."),
+        name: z.string().min(1).optional().describe("New name."),
+        position: z.enum(["top", "bottom"]).optional().describe("Move to leftmost / rightmost."),
+        archived: z.boolean().optional().describe("true to archive, false to restore."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    async ({ board, list, workspace, name, position, archived }) =>
+      guard(async () => {
+        const target = await resolver.target({ board, workspace, list });
+        if (!target.list) throw new Error("List could not be resolved.");
+        const updated = await client.updateList(target.list.id, {
+          name,
+          pos: position,
+          closed: archived,
+        });
+        resolver.invalidate();
+        return ok({ list: updated.name, archived: updated.closed });
+      }),
+  );
+
+  server.registerTool(
+    "create_label",
+    {
+      title: "Create a label on a board",
+      description:
+        "Add a label to a board so cards can carry it. Labels are per-board. Use area " +
+        "names (client, project, life area), not priorities.",
+      inputSchema: {
+        board: z.string().describe("Board name or id."),
+        name: z.string().min(1).describe("Label name."),
+        workspace: z.string().optional().describe("Workspace name, to disambiguate boards."),
+        color: z
+          .enum(LABEL_COLORS)
+          .nullable()
+          .optional()
+          .describe("Trello colour, or null for a colourless label. Default null."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ board, name, workspace, color }) =>
+      guard(async () => {
+        const target = await resolver.target({ board, workspace });
+        const label = await client.createLabel(target.board.id, name, color ?? null);
+        return ok({
+          created: label.name,
+          color: label.color,
+          board: `${target.workspace?.displayName ?? "(personal)"} > ${target.board.name}`,
+          id: label.id,
+        });
       }),
   );
 

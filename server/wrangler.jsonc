@@ -7,7 +7,7 @@
   "observability": { "enabled": true },
   "vars": {
     // Comma-separated workspace names the AI may touch. Empty = all of them.
-    // Example: "Personal,Acme Client"
+    // Example: "Razi's workspace,SHYFT"
     "TRELLO_ALLOWED_WORKSPACES": "",
     "TRELLO_READ_ONLY": "false"
   }

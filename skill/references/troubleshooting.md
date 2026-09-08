@@ -81,13 +81,15 @@ remote client needs re-pasting for that reason alone.
 
 ```bash
 curl -s https://<worker>/health                      # -> ok
-node scripts/smoke.mjs                               # offline: handshake + 14 tools (build first)
+node scripts/smoke.mjs                               # offline: handshake + 23 tools (build first)
 npm run verify                                       # live, read-only: workspaces + boards
 ```
 
 `verify` only touches GET endpoints — safe to run against a production Trello at any time.
 
 ## Known limits
+
+- **Trello's native Inbox is not reachable via the REST API.** Inbox is walled off from the REST API entirely. Tested 2026-09-01 with a token carrying the maximal scope (read,write,account): /lists/{inboxList}/cards, /boards/{inboxBoard} and /members/me/inbox all return 401 "unauthorized permission requested" while /members/me succeeds on the same token. The member object exposes the Inbox board/list ids but nothing can read them. First-party-only surface - do not re-test. If a user wants AI capture, point them at a board list, not the Inbox.
 
 - **Custom Fields are not exposed.** Paid Trello feature; labels are the workaround. Adding
   support means extending `TrelloClient` first, then surfacing tools.

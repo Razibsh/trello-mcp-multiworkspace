@@ -144,7 +144,7 @@ There is deliberately no delete tool. Trello's own MCP made the same call, and i
 ```bash
 npm run typecheck
 npm run build
-node scripts/smoke.mjs     # offline: handshake + all 14 tools, no Trello calls
+node scripts/smoke.mjs     # offline: handshake + all 23 tools, no Trello calls
 npm run verify             # live: credentials and workspace scope (read-only)
 ```
 

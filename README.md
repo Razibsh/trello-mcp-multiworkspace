@@ -21,11 +21,12 @@ AI side.
 
 ## What you get
 
-A stateless Cloudflare Worker (free tier) exposing 14 tools:
+A stateless Cloudflare Worker (free tier) exposing 23 tools:
 
-`list_workspaces` · `list_boards` · `get_board` · `list_cards` · `my_tasks` · `search_cards` ·
-`get_card` · `create_card` · `update_card` · `move_card` · `archive_card` · `add_comment` ·
-`add_checklist` · `set_checklist_item`
+`list_workspaces` · `list_boards` · `get_board` · `get_board_activity` · `list_cards` · `my_tasks` ·
+`search_cards` · `get_card` · `get_card_comments` · `create_board` · `create_list` · `update_list` ·
+`create_label` · `create_card` · `update_card` · `assign_card` · `move_card` · `archive_card` ·
+`add_comment` · `update_comment` · `attach_link` · `add_checklist` · `set_checklist_item`
 
 `my_tasks` is the one that justifies the whole thing: every card assigned to you across
 *every* workspace, sorted by due date. A per-workspace connection structurally cannot do that.

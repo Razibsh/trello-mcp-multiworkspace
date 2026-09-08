@@ -24,10 +24,12 @@ up as a simplification.
 
 ## What gets built
 
-A stateless Cloudflare Worker exposing 14 tools: `list_workspaces`, `list_boards`,
-`get_board`, `list_cards`, `my_tasks`, `search_cards`, `get_card`, `create_card`,
-`update_card`, `move_card`, `archive_card`, `add_comment`, `add_checklist`,
-`set_checklist_item`.
+A stateless Cloudflare Worker exposing 23 tools (v1.1.0):
+
+`list_workspaces` · `list_boards` · `get_board` · `get_board_activity` · `list_cards` · `my_tasks` · `search_cards` · `get_card` · `get_card_comments` · `create_board` · `create_list` · `update_list` · `create_label` · `create_card` · `update_card` · `assign_card` · `move_card` · `archive_card` · `add_comment` · `update_comment` · `attach_link` · `add_checklist` · `set_checklist_item`
+
+There is deliberately no `create_workspace`: a workspace is a permission boundary and
+creating one should stay a human act. There is no delete of anything - archive only.
 
 `my_tasks` is the headline: every card assigned to the user across *all* workspaces, sorted
 by due date. That's the thing a per-workspace connection structurally cannot do — lead with

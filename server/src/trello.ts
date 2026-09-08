@@ -83,6 +83,35 @@ export interface Checklist {
   checkItems: CheckItem[];
 }
 
+export const LABEL_COLORS = [
+  "yellow", "purple", "blue", "red", "green", "orange", "black", "sky", "pink", "lime",
+] as const;
+export type LabelColor = (typeof LABEL_COLORS)[number];
+
+/** A Trello action: comments, moves, creates, etc. `data` varies by type. */
+export interface Action {
+  id: string;
+  type: string;
+  date: string;
+  data: {
+    text?: string;
+    card?: { id: string; name: string; shortLink?: string };
+    list?: { id: string; name: string };
+    listBefore?: { id: string; name: string };
+    listAfter?: { id: string; name: string };
+    board?: { id: string; name: string };
+    [k: string]: unknown;
+  };
+  memberCreator?: Member;
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  url: string;
+  date: string;
+}
+
 export class TrelloError extends Error {
   constructor(
     message: string,
@@ -335,8 +364,92 @@ export class TrelloClient {
     });
   }
 
+  /**
+   * Membership uses Trello's dedicated endpoints rather than PUT idMembers=...,
+   * because clearing the last member needs an empty value and request() drops
+   * empty params — the set-overwrite form can therefore never fully unassign.
+   */
+  addMember(idCard: string, idMember: string): Promise<unknown> {
+    return this.request("POST", `/cards/${idCard}/idMembers`, { value: idMember });
+  }
+
+  removeMember(idCard: string, idMember: string): Promise<unknown> {
+    return this.request("DELETE", `/cards/${idCard}/idMembers/${idMember}`);
+  }
+
   addComment(idCard: string, text: string): Promise<unknown> {
     return this.request("POST", `/cards/${idCard}/actions/comments`, { text });
+  }
+
+  /** Comments live in Trello's action log, so this is an actions query filtered to commentCard. */
+  cardComments(idCard: string, limit = 50): Promise<Action[]> {
+    return this.request<Action[]>("GET", `/cards/${idCard}/actions`, {
+      filter: "commentCard",
+      limit,
+      fields: "id,type,date,data",
+      memberCreator_fields: "id,username,fullName",
+    });
+  }
+
+  /** Only the comment's author can edit it; Trello enforces that, we just surface the error. */
+  updateComment(idCard: string, idAction: string, text: string): Promise<Action> {
+    return this.request<Action>("PUT", `/cards/${idCard}/actions/${idAction}/comments`, {
+      text,
+    });
+  }
+
+  attachUrl(idCard: string, url: string, name?: string): Promise<Attachment> {
+    return this.request<Attachment>("POST", `/cards/${idCard}/attachments`, { url, name });
+  }
+
+  // ---------- activity ----------
+
+  boardActions(idBoard: string, limit = 50): Promise<Action[]> {
+    return this.request<Action[]>("GET", `/boards/${idBoard}/actions`, {
+      limit,
+      fields: "id,type,date,data",
+      memberCreator_fields: "id,username,fullName",
+    });
+  }
+
+  // ---------- structure: boards, lists, labels ----------
+
+  createBoard(input: {
+    name: string;
+    idOrganization: string;
+    desc?: string;
+  }): Promise<Board> {
+    // defaultLists=false: the caller decides the list structure rather than
+    // inheriting Trello's "To Do / Doing / Done".
+    return this.request<Board>("POST", "/boards", {
+      name: input.name,
+      idOrganization: input.idOrganization,
+      desc: input.desc,
+      defaultLists: false,
+    });
+  }
+
+  createList(idBoard: string, name: string, pos: "top" | "bottom" = "bottom"): Promise<List> {
+    return this.request<List>("POST", "/lists", { name, idBoard, pos });
+  }
+
+  updateList(
+    idList: string,
+    patch: { name?: string; pos?: "top" | "bottom"; closed?: boolean },
+  ): Promise<List> {
+    return this.request<List>("PUT", `/lists/${idList}`, {
+      name: patch.name,
+      pos: patch.pos,
+      closed: patch.closed,
+    });
+  }
+
+  createLabel(idBoard: string, name: string, color: LabelColor | null): Promise<Label> {
+    return this.request<Label>("POST", "/labels", {
+      idBoard,
+      name,
+      color: color ?? "null",
+    });
   }
 
   // ---------- checklists ----------

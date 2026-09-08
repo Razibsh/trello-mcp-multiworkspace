@@ -86,7 +86,7 @@ because only Spark exposes custom MCP tools. Go to Spark.
 
 1. Paste the path-secret URL, click **Next**
 2. Leave **Client ID** and **Client secret** empty — the server doesn't speak OAuth
-3. Confirm; the tool list appears (14 functions) as a good sign
+3. Confirm; the tool list appears (23 functions) as a good sign
 4. Toggle the app on
 
 Gemini has no request-header field, so the path-secret URL is the only option here.

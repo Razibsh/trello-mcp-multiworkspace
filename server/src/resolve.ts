@@ -93,6 +93,15 @@ export class Resolver {
     return Date.now() - entry.at < Resolver.TTL_MS ? entry.value : undefined;
   }
 
+  /**
+   * Drop cached structure after a tool creates or renames a board or list,
+   * so the next name lookup sees it instead of waiting out the TTL.
+   */
+  invalidate(): void {
+    this.boardCache = undefined;
+    this.listCache.clear();
+  }
+
   async workspaces(): Promise<Workspace[]> {
     const hit = this.fresh(this.workspaceCache);
     if (hit) return hit;

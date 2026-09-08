@@ -51,9 +51,11 @@ setTimeout(() => {
 
   const names = (tools?.result?.tools ?? []).map((t) => t.name).sort();
   const expected = [
-    "add_checklist", "add_comment", "archive_card", "create_card", "get_board",
-    "get_card", "list_boards", "list_cards", "list_workspaces", "move_card",
-    "my_tasks", "search_cards", "set_checklist_item", "update_card",
+    "add_checklist", "add_comment", "archive_card", "assign_card", "attach_link", "create_board",
+    "create_card", "create_label", "create_list", "get_board", "get_board_activity",
+    "get_card", "get_card_comments", "list_boards", "list_cards", "list_workspaces",
+    "move_card", "my_tasks", "search_cards", "set_checklist_item", "update_card",
+    "update_comment", "update_list",
   ];
   const missing = expected.filter((e) => !names.includes(e));
   if (missing.length === 0) {
