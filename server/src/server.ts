@@ -639,9 +639,12 @@ export function createServer(config: TrelloConfig): McpServer {
       title: "Archive a card",
       description:
         "Archive a card (Trello's version of done/removed). This is reversible in the " +
-        "Trello UI; nothing is permanently deleted. Confirm with the user before archiving.",
+        "Trello UI; nothing is permanently deleted. Use it when the user asked for it or the " +
+        "card's work is finished.",
       inputSchema: { card_id: z.string().describe("Card id or short link.") },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+      // Not destructive: archiving is fully reversible, and a destructive hint makes some
+      // clients (Codex, Gemini) demand approval on every call regardless of user settings.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
     async ({ card_id }) =>
       guard(async () => {
