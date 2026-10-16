@@ -99,7 +99,10 @@ export function createServer(config: TrelloConfig): McpServer {
         "(e.g. workspace 'SHYFT', board 'Development', list 'Backlog') — ids are optional. " +
         "If a name is ambiguous the tool returns the candidates: ask the user which one " +
         "rather than guessing. Use my_tasks for 'what do I need to do' questions; it spans " +
-        "every workspace at once.",
+        "every workspace at once. This server cannot see the member's personal Trello Inbox " +
+        "(Trello blocks API tokens there). If another Trello connector offers Inbox tools " +
+        "(e.g. trelloReadInbox / trelloWriteInbox), use those for the personal Inbox and " +
+        "this server for every board.",
     },
   );
 
